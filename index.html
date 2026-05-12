@@ -1,0 +1,624 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>魔法聖誕樹大挑戰</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Varela+Round&display=swap" rel="stylesheet">
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #000;
+            font-family: 'Varela Round', sans-serif; /* 比較活潑圓潤的字體 */
+        }
+        canvas {
+            display: block;
+        }
+        #video-container {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            width: 160px;
+            height: 120px;
+            border: 4px solid #fff;
+            border-radius: 12px;
+            overflow: hidden;
+            z-index: 10;
+            box-shadow: 0 0 15px rgba(255, 255, 255, 0.5);
+            background-color: #333; /* 攝影機開啟前的底色 */
+        }
+        video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: scaleX(-1); /* Mirror effect */
+        }
+        
+        /* 遊戲風格的 UI */
+        #game-ui {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            z-index: 10;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            pointer-events: none; /* 讓點擊穿透到畫布，除了按鈕 */
+        }
+
+        .game-panel {
+            background: rgba(20, 30, 60, 0.85);
+            border: 3px solid #4a90e2;
+            border-radius: 15px;
+            padding: 15px 20px;
+            color: white;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3), inset 0 0 10px rgba(74, 144, 226, 0.5);
+            text-shadow: 1px 1px 2px black;
+        }
+
+        #score-display {
+            font-family: 'Press Start 2P', cursive; /* 像素字體用於分數 */
+            font-size: 1.2rem;
+            color: #ffd700;
+            text-align: center;
+        }
+
+        /* 動作提示文字動畫 */
+        #action-text {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-family: 'Press Start 2P', cursive;
+            font-size: 2rem;
+            color: #ff3366;
+            text-shadow: 2px 2px 0 #fff, -1px -1px 0 #fff, 1px -1px 0 #fff, -1px 1px 0 #fff, 1px 1px 0 #fff;
+            z-index: 20;
+            opacity: 0;
+            transition: opacity 0.3s ease-in-out, transform 0.1s;
+            pointer-events: none;
+        }
+
+        .show-action {
+            opacity: 1 !important;
+            animation: pop 0.5s ease-out;
+        }
+
+        @keyframes pop {
+            0% { transform: translate(-50%, -50%) scale(0.5); }
+            50% { transform: translate(-50%, -50%) scale(1.2); }
+            100% { transform: translate(-50%, -50%) scale(1); }
+        }
+
+        /* 遊戲按鈕樣式 */
+        .game-btn {
+            pointer-events: auto; /* 允許點擊 */
+            background: linear-gradient(to bottom, #4ade80, #16a34a);
+            border: 2px solid #fff;
+            border-radius: 20px;
+            color: white;
+            font-weight: bold;
+            padding: 10px 20px;
+            text-shadow: 1px 1px 1px rgba(0,0,0,0.5);
+            box-shadow: 0 4px 0 #14532d;
+            cursor: pointer;
+            transition: all 0.1s;
+        }
+        .game-btn:active {
+            transform: translateY(4px);
+            box-shadow: 0 0 0 #14532d;
+        }
+        .game-btn.red-btn {
+            background: linear-gradient(to bottom, #f87171, #dc2626);
+            box-shadow: 0 4px 0 #7f1d1d;
+        }
+        .game-btn.red-btn:active {
+            box-shadow: 0 0 0 #7f1d1d;
+        }
+        .game-btn.blue-btn {
+            background: linear-gradient(to bottom, #60a5fa, #2563eb);
+            box-shadow: 0 4px 0 #1e3a8a;
+        }
+        .game-btn.blue-btn:active {
+            box-shadow: 0 0 0 #1e3a8a;
+        }
+
+        #loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            font-size: 1.5rem;
+            font-weight: bold;
+            z-index: 30;
+            background: rgba(0,0,0,0.7);
+            padding: 20px;
+            border-radius: 10px;
+        }
+    </style>
+    <!-- Import Three.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- Import MediaPipe Pose -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
+</head>
+<body>
+
+    <div id="loading">載入魔法引擎中...</div>
+
+    <!-- Camera Feed -->
+    <div id="video-container">
+        <video id="input_video" autoplay playsinline></video>
+    </div>
+
+    <!-- Game UI Layer -->
+    <div id="game-ui" class="hidden">
+        <div class="game-panel">
+            <h1 class="text-xl font-bold text-green-400 mb-2 border-b border-gray-500 pb-1">聖誕樹大挑戰</h1>
+            <ul class="text-sm space-y-2 mt-2">
+                <li>👐 張開：<span class="text-yellow-300">變大發光</span></li>
+                <li>🙏 靠攏：<span class="text-blue-300">縮小</span></li>
+                <li>↔️ 左右平移：<span class="text-purple-300">旋轉</span></li>
+                <li>👏 拍手：<span class="text-red-400">變成紅色</span></li>
+            </ul>
+        </div>
+        
+        <div class="game-panel">
+            <div class="text-sm text-gray-300 mb-1 text-center">魔法能量</div>
+            <div id="score-display">0000</div>
+        </div>
+
+        <div class="flex gap-2">
+            <button id="music-btn" class="game-btn flex-1">
+                🎵 音樂
+            </button>
+            <button id="mic-btn" class="game-btn flex-1 blue-btn">
+                🎤 啟動麥克風
+            </button>
+        </div>
+    </div>
+
+    <!-- Action Text Feedback -->
+    <div id="action-text"></div>
+
+    <!-- Audio Element -->
+    <audio id="bg-music" loop>
+        <source src="https://upload.wikimedia.org/wikipedia/commons/e/e4/Jingle_Bells_%28Kevin_MacLeod%29.ogg" type="audio/ogg">
+    </audio>
+
+    <script>
+        // --- Three.js Setup ---
+        const scene = new THREE.Scene();
+        scene.fog = new THREE.FogExp2(0x0a0a2a, 0.02); // Add a bit of dark blue fog for atmosphere
+
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 5, 20);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        document.body.appendChild(renderer.domElement);
+
+        // --- Lighting ---
+        const ambientLight = new THREE.AmbientLight(0x404040, 1.5); // Soft white light
+        scene.add(ambientLight);
+
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        directionalLight.position.set(10, 20, 10);
+        directionalLight.castShadow = true;
+        scene.add(directionalLight);
+
+        // A point light near the top of the tree for extra glow
+        const pointLight = new THREE.PointLight(0xffaa00, 1, 20);
+        pointLight.position.set(0, 12, 0);
+        scene.add(pointLight);
+
+        // --- Create Christmas Tree ---
+        const treeBaseGroup = new THREE.Group();
+        const treeGroup = new THREE.Group();
+        treeBaseGroup.add(treeGroup);
+        scene.add(treeBaseGroup);
+
+        // 1. Trunk (Cylinder)
+        const trunkGeometry = new THREE.CylinderGeometry(0.8, 1.2, 3, 16);
+        const trunkMaterial = new THREE.MeshStandardMaterial({ 
+            color: 0x4d2904, // Brown
+            roughness: 0.9 
+        });
+        const trunk = new THREE.Mesh(trunkGeometry, trunkMaterial);
+        trunk.position.y = 1.5;
+        trunk.castShadow = true;
+        trunk.receiveShadow = true;
+        treeGroup.add(trunk);
+
+        // 2. Leaves (Cones in layers)
+        const leafMaterial = new THREE.MeshStandardMaterial({ 
+            color: 0x0f5922, // Dark Green
+            roughness: 0.7,
+            flatShading: true // Gives a slightly low-poly/stylized look
+        });
+
+        const leafLayer1 = new THREE.Mesh(new THREE.ConeGeometry(5, 4, 16), leafMaterial);
+        leafLayer1.position.y = 4.5;
+        leafLayer1.castShadow = true;
+        leafLayer1.receiveShadow = true;
+        treeGroup.add(leafLayer1);
+
+        const leafLayer2 = new THREE.Mesh(new THREE.ConeGeometry(4, 3.5, 16), leafMaterial);
+        leafLayer2.position.y = 6.5;
+        leafLayer2.castShadow = true;
+        leafLayer2.receiveShadow = true;
+        treeGroup.add(leafLayer2);
+
+        const leafLayer3 = new THREE.Mesh(new THREE.ConeGeometry(3, 3, 16), leafMaterial);
+        leafLayer3.position.y = 8.5;
+        leafLayer3.castShadow = true;
+        leafLayer3.receiveShadow = true;
+        treeGroup.add(leafLayer3);
+
+        // 3. Star on top
+        const starGeometry = new THREE.OctahedronGeometry(0.8, 0);
+        const starMaterial = new THREE.MeshStandardMaterial({
+            color: 0xffd700, // Gold
+            emissive: 0xffaa00,
+            emissiveIntensity: 0.5,
+            roughness: 0.2,
+            metalness: 1.0
+        });
+        const star = new THREE.Mesh(starGeometry, starMaterial);
+        star.position.y = 10.5;
+        star.castShadow = true;
+        treeGroup.add(star);
+
+        // --- Ornaments (裝飾品) ---
+        const ornamentsMaterials = [];
+        const ornamentColors = [0xff0000, 0x0000ff, 0xffa500, 0xff00ff, 0x00ffff, 0xffffff];
+
+        function addOrnamentsToLayer(yOffset, radius, count) {
+            for (let i = 0; i < count; i++) {
+                const angle = (i / count) * Math.PI * 2;
+                const r = radius * 0.85; 
+                const x = Math.cos(angle) * r;
+                const z = Math.sin(angle) * r;
+                const y = yOffset - (Math.random() * 2);
+
+                const geometry = new THREE.SphereGeometry(0.3, 16, 16);
+                const color = ornamentColors[Math.floor(Math.random() * ornamentColors.length)];
+                const material = new THREE.MeshStandardMaterial({
+                    color: color,
+                    emissive: color,
+                    emissiveIntensity: 0.2,
+                    roughness: 0.2,
+                    metalness: 0.8
+                });
+                const ornament = new THREE.Mesh(geometry, material);
+                ornament.position.set(x, y, z);
+                treeGroup.add(ornament);
+                ornamentsMaterials.push(material);
+            }
+        }
+
+        addOrnamentsToLayer(4.5, 4.5, 12);
+        addOrnamentsToLayer(6.5, 3.5, 10);
+        addOrnamentsToLayer(8.5, 2.5, 8);
+
+        // --- Snow Particles ---
+        const snowGeometry = new THREE.BufferGeometry();
+        const snowCount = 1000;
+        const snowPositions = new Float32Array(snowCount * 3);
+
+        for (let i = 0; i < snowCount * 3; i += 3) {
+            snowPositions[i] = (Math.random() - 0.5) * 40;     // x
+            snowPositions[i + 1] = Math.random() * 30;         // y
+            snowPositions[i + 2] = (Math.random() - 0.5) * 40; // z
+        }
+
+        snowGeometry.setAttribute('position', new THREE.BufferAttribute(snowPositions, 3));
+        const snowMaterial = new THREE.PointsMaterial({
+            color: 0xffffff,
+            size: 0.15,
+            transparent: true,
+            opacity: 0.8
+        });
+        const snowSystem = new THREE.Points(snowGeometry, snowMaterial);
+        scene.add(snowSystem);
+
+        // --- Window Resize ---
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // --- Music Controls ---
+        const musicBtn = document.getElementById('music-btn');
+        const bgMusic = document.getElementById('bg-music');
+        let isPlaying = false;
+        let isPlayToggling = false;
+
+        musicBtn.addEventListener('click', async () => {
+            if (isPlayToggling) return; 
+            isPlayToggling = true;
+
+            try {
+                if (isPlaying) {
+                    bgMusic.pause();
+                    musicBtn.innerText = '🎵 音樂';
+                    musicBtn.classList.remove('red-btn');
+                    isPlaying = false;
+                } else {
+                    await bgMusic.play();
+                    musicBtn.innerText = '🔇 停止';
+                    musicBtn.classList.add('red-btn');
+                    isPlaying = true;
+                }
+            } catch (err) {
+                console.warn("Music playback failed:", err);
+                isPlaying = !bgMusic.paused;
+            } finally {
+                isPlayToggling = false;
+            }
+        });
+
+        // --- Microphone & Clap Detection Setup ---
+        const micBtn = document.getElementById('mic-btn');
+        let isMicEnabled = false;
+        let audioContext, analyser, dataArray;
+        let lastClapTime = 0;
+        
+        const originalTreeColor = new THREE.Color(0x0f5922); // 深綠色
+        const magicRedColor = new THREE.Color(0xdc2626); // 火焰紅
+        let targetTreeColor = new THREE.Color(0x0f5922);
+
+        micBtn.addEventListener('click', async () => {
+            if (isMicEnabled) return;
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                analyser = audioContext.createAnalyser();
+                analyser.fftSize = 256;
+                const source = audioContext.createMediaStreamSource(stream);
+                source.connect(analyser);
+                dataArray = new Uint8Array(analyser.frequencyBinCount);
+                
+                isMicEnabled = true;
+                micBtn.innerText = '🎤 收音中';
+                micBtn.style.opacity = '0.5';
+                micBtn.style.pointerEvents = 'none';
+            } catch (err) {
+                console.warn("Microphone access denied:", err);
+                showActionFeedback("麥克風存取失敗");
+            }
+        });
+
+        // --- Control Variables ---
+        let targetScale = 1.0;
+        let currentScale = 1.0;
+        const scaleLerpFactor = 0.1;
+
+        let targetRotationY = 0;
+        let currentRotationY = 0;
+        const rotationLerpFactor = 0.05;
+
+        // Game Score System
+        let score = 0;
+        const scoreDisplay = document.getElementById('score-display');
+        const actionText = document.getElementById('action-text');
+        let lastAction = "";
+        let actionTimeout = null;
+
+        function updateScore(points) {
+            score += points;
+            // Pad with leading zeros
+            scoreDisplay.innerText = score.toString().padStart(4, '0');
+        }
+
+        function showActionFeedback(text) {
+            if (lastAction === text) return; // Don't spam same text
+            lastAction = text;
+            
+            actionText.innerText = text;
+            actionText.classList.add('show-action');
+            
+            clearTimeout(actionTimeout);
+            actionTimeout = setTimeout(() => {
+                actionText.classList.remove('show-action');
+                lastAction = "";
+            }, 1000);
+        }
+
+        // --- MediaPipe Pose Setup ---
+        const videoElement = document.getElementById('input_video');
+        const loadingElement = document.getElementById('loading');
+        const gameUiElement = document.getElementById('game-ui');
+
+        function onResults(results) {
+            if (!results.poseLandmarks) {
+                return;
+            }
+
+            const landmarks = results.poseLandmarks;
+            const leftWrist = landmarks[15];
+            const rightWrist = landmarks[16];
+
+            if (leftWrist && rightWrist) {
+                // 1. Calculate distance for Scaling
+                const dx = leftWrist.x - rightWrist.x;
+                const dy = leftWrist.y - rightWrist.y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+
+                // Map distance to scale (tune these values based on camera field of view)
+                // Assuming distance ranges roughly from 0.1 (hands together) to 0.7 (hands apart)
+                const minDistance = 0.1;
+                const maxDistance = 0.6;
+                const minScale = 0.5;
+                const maxScale = 2.5;
+
+                // Clamp distance
+                const clampedDistance = Math.max(minDistance, Math.min(distance, maxDistance));
+                
+                // Calculate percentage
+                const percentage = (clampedDistance - minDistance) / (maxDistance - minDistance);
+                
+                // Set target scale
+                targetScale = minScale + percentage * (maxScale - minScale);
+
+                // Game feedback for scaling
+                if (targetScale > 2.0) {
+                    showActionFeedback("SUPER BIG!");
+                    updateScore(2);
+                } else if (targetScale < 0.6) {
+                    showActionFeedback("TINY TREE");
+                    updateScore(1);
+                }
+
+                // 2. Calculate center X for Rotation
+                // X coordinates in MediaPipe are 0.0 (left) to 1.0 (right)
+                const centerX = (leftWrist.x + rightWrist.x) / 2;
+                
+                // If center is off the middle (0.5), we rotate
+                // The video is mirrored, so coordinates are flipped visually
+                const deadzone = 0.1; // Don't rotate if hands are roughly in the middle
+                const normalizedCenterX = centerX - 0.5;
+
+                if (Math.abs(normalizedCenterX) > deadzone) {
+                    // Calculate rotation speed based on how far off center hands are
+                    const rotationSpeed = (Math.abs(normalizedCenterX) - deadzone) * 0.1;
+                    
+                    // Add to target rotation
+                    if (normalizedCenterX < 0) {
+                        targetRotationY -= rotationSpeed; // Move left
+                    } else {
+                        targetRotationY += rotationSpeed; // Move right
+                    }
+                    
+                    // Game feedback for rotating
+                    if (Math.random() < 0.05) { // Only occasionally show text while spinning
+                        showActionFeedback("SPIN!");
+                        updateScore(1);
+                    }
+                }
+            }
+        }
+
+        const pose = new Pose({locateFile: (file) => {
+            return `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`;
+        }});
+
+        pose.setOptions({
+            modelComplexity: 1,
+            smoothLandmarks: true,
+            enableSegmentation: false,
+            smoothSegmentation: false,
+            minDetectionConfidence: 0.5,
+            minTrackingConfidence: 0.5
+        });
+
+        pose.onResults(onResults);
+
+        const camera_mp = new Camera(videoElement, {
+            onFrame: async () => {
+                await pose.send({image: videoElement});
+            },
+            width: 320,
+            height: 240
+        });
+
+        camera_mp.start().then(() => {
+            // Hide loading, show UI
+            loadingElement.style.display = 'none';
+            gameUiElement.classList.remove('hidden');
+        });
+
+        // --- Animation Loop ---
+        const clock = new THREE.Clock();
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // --- Update Tree Transform ---
+            
+            // Smoothly interpolate current scale to target scale
+            currentScale += (targetScale - currentScale) * scaleLerpFactor;
+            
+            // Apply scale to the base group
+            treeBaseGroup.scale.set(currentScale, currentScale, currentScale);
+
+            // --- Clap Detection Logic ---
+            if (isMicEnabled && analyser) {
+                analyser.getByteTimeDomainData(dataArray);
+                let maxAmp = 0;
+                for (let i = 0; i < dataArray.length; i++) {
+                    let amp = Math.abs(dataArray[i] - 128);
+                    if (amp > maxAmp) maxAmp = amp;
+                }
+                
+                // 偵測音量峰值 (0~128)，>60 通常代表有明顯的突發聲響(如拍手)
+                if (maxAmp > 60) {
+                    const now = Date.now();
+                    if (now - lastClapTime > 2000) { // 設定 2 秒的冷卻時間
+                        lastClapTime = now;
+                        targetTreeColor.copy(magicRedColor);
+                        showActionFeedback("FIRE MAGIC!");
+                        updateScore(5);
+                        
+                        // 1.5 秒後將目標顏色設回原本的綠色
+                        setTimeout(() => {
+                            targetTreeColor.copy(originalTreeColor);
+                        }, 1500);
+                    }
+                }
+            }
+
+            // 平滑轉換樹葉的顏色
+            leafMaterial.color.lerp(targetTreeColor, 0.1);
+
+            // --- Glow Logic ---
+            const extraScale = Math.max(0, currentScale - 1.0); 
+            const glowIntensity = 0.2 + (extraScale * 2.0); 
+
+            ornamentsMaterials.forEach(mat => {
+                mat.emissiveIntensity = glowIntensity;
+            });
+            starMaterial.emissiveIntensity = 0.5 + (extraScale * 2.5);
+            pointLight.intensity = 0.5 + (extraScale * 2.0);
+
+            // Smoothly interpolate rotation
+            currentRotationY += (targetRotationY - currentRotationY) * rotationLerpFactor;
+            treeBaseGroup.rotation.y = currentRotationY;
+
+            // --- Animate Snow ---
+            const time = clock.getElapsedTime();
+            const positions = snowSystem.geometry.attributes.position.array;
+            
+            for (let i = 0; i < snowCount * 3; i += 3) {
+                // Move down
+                positions[i + 1] -= 0.05;
+                
+                // Add a little sway
+                positions[i] += Math.sin(time + positions[i+1]) * 0.01;
+
+                // Reset to top if it falls below 0
+                if (positions[i + 1] < 0) {
+                    positions[i + 1] = 30;
+                }
+            }
+            snowSystem.geometry.attributes.position.needsUpdate = true;
+
+            // Idle rotation for the star
+            star.rotation.y += 0.02;
+            star.rotation.x += 0.01;
+
+            renderer.render(scene, camera);
+        }
+
+        animate();
+    </script>
+</body>
+</html>
